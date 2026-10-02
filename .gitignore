@@ -1,0 +1,11 @@
+# secrets — never commit the live config
+extension/config.js
+
+# node
+node_modules/
+
+# editor / os cruft
+.DS_Store
+*.swp
+*~
+.*.tmp.*

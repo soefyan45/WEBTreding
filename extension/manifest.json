@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "AI Trading Signal — XAUUSD M15",
+  "version": "0.1.0",
+  "description": "Dev skeleton: price sampling, candle builder, indicators, overlay. LLM/order wiring in later iterations.",
+  "permissions": ["storage", "activeTab", "scripting", "alarms", "sidePanel"],
+  "host_permissions": [
+    "https://my.exness.com/*",
+    "https://rtapi-sg.eccweb.mobi/*",
+    "https://rtapi-sg.fognetgapoatseadaymagqak.com/*",
+    "http://100.93.223.123:20128/*",
+    "https://openrouter.ai/*",
+    "https://api.fxmacrodata.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://my.exness.com/webtrading/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "AI Trading Signal — buka side panel"
+  }
+}
