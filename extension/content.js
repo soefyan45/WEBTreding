@@ -109,7 +109,9 @@ async function backfillCandles(timeFrameSec = 900, count = 300) {
   const cid = readCookie("exterm_web_cid");
 
   if (!jwt || !account || !domain) {
-    throw new Error(`backfill: missing auth (jwt=${!!jwt} acc=${!!account} dom=${!!domain})`);
+    throw new Error(
+      `auth belum lengkap (jwt=${!!jwt} acc=${!!account} dom=${!!domain} cid=${!!cid}) — pastikan sudah login & pilih akun`
+    );
   }
 
   const url =
@@ -117,12 +119,19 @@ async function backfillCandles(timeFrameSec = 900, count = 300) {
     `/instruments/XAUUSDm/candles?time_frame=${timeFrameSec}` +
     `&from=${Date.now()}&count=-${count}&price=bid`;
 
-  const resp = await fetch(url, {
-    headers: { Authorization: `Bearer ${jwt}`, "X-Cid": cid, Accept: "application/json" }
-  });
-  if (!resp.ok) throw new Error(`backfill: HTTP ${resp.status}`);
-  const data = await resp.json();
+  let data;
+  try {
+    const resp = await fetch(url, {
+      headers: { Authorization: `Bearer ${jwt}`, "X-Cid": cid, Accept: "application/json" }
+    });
+    if (!resp.ok) throw new Error(`rtapi jawab HTTP ${resp.status} (session mungkin expired — refresh tab lalu coba lagi)`);
+    data = await resp.json();
+  } catch (e) {
+    if (e.message.startsWith("rtapi jawab")) throw e;
+    throw new Error(`rtapi tidak bisa dijangkau (${e.message})`);
+  }
   const history = data.price_history || [];
+  if (!history.length) throw new Error("rtapi balik tanpa candle (price_history kosong)");
 
   return history.map((c) => ({ time: c.t, o: c.o, h: c.h, l: c.l, c: c.c }));
 }

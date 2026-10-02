@@ -16,30 +16,53 @@ chrome.sidePanel
   .catch((e) => console.error("[AI-TS] sidePanel behavior", e));
 
 // --- Backfill: pull M15 history from the Exness tab (it holds the auth) ----
+// Diagnostics: every stage reports so the user sees *which* step failed
+// (tab open? content script injected? auth present? rtapi status code?),
+// not one generic "check tab" message.
 async function requestBackfill() {
   const tabs = await chrome.tabs.query({ url: "https://my.exness.com/webtrading/*" });
-  if (!tabs.length) return { ok: false, error: "Exness tab not open" };
+  if (!tabs.length)
+    return { ok: false, error: "Tab Exness belum terbuka — buka my.exness.com/webtrading", stage: "tab" };
 
+  let res;
   try {
-    const res = await chrome.tabs.sendMessage(tabs[0].id, {
+    res = await chrome.tabs.sendMessage(tabs[0].id, {
       type: "BACKFILL_REQUEST",
       timeFrameSec: CONFIG.TIMEFRAME_MIN * 60,
       count: 300
     });
-    if (!res?.ok) return { ok: false, error: res?.error || "backfill failed" };
-
-    const existing = await getCandles();
-    const merged = new Map();
-    for (const c of res.candles) merged.set(c.time, c); // history first
-    for (const c of existing) merged.set(c.time, c); // live candles win on overlap
-
-    const candles = [...merged.values()].sort((a, b) => a.time - b.time).slice(-250);
-    await saveCandles(candles);
-    return { ok: true, count: candles.length };
   } catch (e) {
-    return { ok: false, error: e.message };
+    // No listener — either content script still loading or auth/DOM not ready.
+    return { ok: false, error: `Content script belum siap (${e.message}) — reload tab Exness`, stage: "content" };
   }
+
+  if (!res?.ok) {
+    const err = res?.error || "unknown";
+    const stage = /auth/i.test(err) ? "auth" : "rtapi";
+    return { ok: false, error: `Backfill gagal [${stage}]: ${err}`, stage };
+  }
+
+  const existing = await getCandles();
+  const merged = new Map();
+  for (const c of res.candles) merged.set(c.time, c); // history first
+  for (const c of existing) merged.set(c.time, c); // live candles win on overlap
+
+  const candles = [...merged.values()].sort((a, b) => a.time - b.time).slice(-250);
+  await saveCandles(candles);
+  if (candles.length < 30)
+    return { ok: false, error: `Backfill balik tapi cuma ${candles.length} candle (<30)`, stage: "count" };
+  return { ok: true, count: candles.length, stage: "ok" };
 }
+
+// Auto-backfill on SW start so a fresh install doesn't need a manual click.
+// Errors are non-blocking (log only — first Analyze retry is the real gate).
+(async () => {
+  const { candles = [] } = await chrome.storage.local.get("candles");
+  if (candles.length < 30) {
+    const bf = await requestBackfill();
+    console.log(`[AI-TS] startup backfill: ${bf.ok ? `OK ${bf.count} candle` : bf.error}`);
+  }
+})();
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "PRICE_TICK") {
@@ -48,8 +71,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === "REQUEST_BACKFILL") {
-    requestBackfill().then(sendResponse);
-    return true;
+    requestBackfill()
+      .then(async (bf) => {
+        const { candles = [] } = await chrome.storage.local.get("candles");
+        sendResponse(bf.ok ? { ...bf, count: candles.length } : bf);
+      })
+      .catch((e) => sendResponse({ ok: false, error: e.message, stage: "unknown" }));
+    return true; // async
   }
 
   if (msg.type === "REQUEST_SIGNAL") {
@@ -719,12 +747,10 @@ async function doAnalysis() {
   if (candles.length < 30) {
     const bf = await requestBackfill();
     if (bf.ok) candles = await getCandles();
-  }
-
-  if (candles.length < 30) {
-    return {
-      error: `Baru ${candles.length} candle, butuh minimal 30. Backfill gagal (pastikan tab Exness terbuka & login).`
-    };
+    else
+      return {
+        error: `Candle belum cukup (${candles.length}/30). ${bf.error}`
+      };
   }
 
   const indicators = computeIndicators(candles);
