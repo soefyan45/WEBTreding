@@ -12,6 +12,8 @@ chart.
 > pre-fills the order panel; you still press Buy/Sell + Confirm. Trailing
 > stop also only runs when you click the button.
 
+![AI Trading Signal — side panel](ssaplikasi.png)
+
 > **Purpose & ethical scope.** This extension is purely an analysis aid: it
 > **reads data already rendered on the page** (price from the tab title,
 > positions from the DOM) and processes it with technical indicators and an

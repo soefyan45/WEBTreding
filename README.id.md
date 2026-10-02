@@ -11,6 +11,8 @@ rencana posisi — lengkap dengan visual di chart.
 > menyiapkan panel order; kamu yang menekan Buy/Sell + Confirm. Trailing stop
 > juga hanya jalan saat tombol ditekan.
 
+![AI Trading Signal — side panel](ssaplikasi.png)
+
 > **Tujuan & etika penggunaan.** Extension ini murni alat bantu analisa: ia
 > **membaca data yang sudah tampil di halaman** (harga pada judul tab, posisi
 > pada DOM) lalu mengolahnya dengan indikator teknikal dan LLM/AI model agar
