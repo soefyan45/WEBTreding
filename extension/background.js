@@ -26,7 +26,7 @@ async function exnessTabReady() {
   const tabs = await chrome.tabs.query({ url: "https://my.exness.com/webtrading/*" });
   if (!tabs.length)
     return { error: "Tab Exness belum terbuka — buka my.exness.com/webtrading", stage: "tab" };
-  const tab = tabs[0];
+  const tab = pickExnessTab(tabs);
 
   const ping = () => chrome.tabs.sendMessage(tab.id, { type: "PING" });
   try {
@@ -218,9 +218,17 @@ async function trailStops() {
 // Drawn through the chart's own shape API. The widget object lives in the page's
 // MAIN world (not our content script's isolated world), so we inject a function
 // into MAIN to create/remove the horizontal lines.
+// Prefer the focused Exness tab: with several tabs open, tabs[0] can be a
+// stale background tab, and shapes drawn there are invisible to the user.
+// "Active" is per-window, so a focused window wins when there are several.
+function pickExnessTab(tabs) {
+  return tabs.find((t) => t.active) || tabs[0];
+}
+
 async function exnessTab() {
   const tabs = await chrome.tabs.query({ url: "https://my.exness.com/webtrading/*" });
-  return tabs[0] || null;
+  const focused = await chrome.windows.getLastFocused();
+  return tabs.find((t) => t.active && t.windowId === focused.id) || pickExnessTab(tabs) || null;
 }
 
 async function drawSupportResistance() {
