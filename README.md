@@ -1,142 +1,144 @@
 # AI Trading Signal — XAUUSD M15
 
-Chrome/Brave extension (MV3) yang menganalisa chart **XAUUSD M15** di Exness
-WebTerminal, meminta verdict dari LLM melalui pipeline **debat 2 tahap**
-(analis → pendebat kontrarian), lalu menampilkan sinyal, level S/R, tren, dan
-rencana posisi — lengkap dengan visual di chart.
+> [Bahasa Indonesia](README.id.md) · **English**
 
-> **Eksekusi manual.** Extension tidak pernah mengirim order sendiri. Ia hanya
-> menyiapkan panel order; kamu yang menekan Buy/Sell + Confirm. Trailing stop
-> juga hanya jalan saat tombol ditekan.
+A Chrome/Brave extension (MV3) that analyzes the **XAUUSD M15** chart on
+Exness WebTerminal, asks an LLM for a verdict via a **2-stage debate
+pipeline** (analyst → contrarian debater), then renders the signal, S/R
+levels, trend, and a position plan — with visuals drawn directly on the
+chart.
 
-> **Tujuan & etika penggunaan.** Extension ini murni alat bantu analisa: ia
-> **membaca data yang sudah tampil di halaman** (harga pada judul tab, posisi
-> pada DOM) lalu mengolahnya dengan indikator teknikal dan LLM/AI model agar
-> user lebih mudah menganalisa — bukan untuk mengeksploitasi, mem-bypass
-> proteksi, atau merusak platform. Tidak ada scraping tersembunyi, tidak ada
-> manipulasi order, dan tidak ada akses di luar yang diizinkan WebTerminal
-> sendiri kepada usernya. Pertanggungjawaban kepatuhan terhadap ToS broker
-> tetap di tangan pengguna.
+> **Manual execution.** The extension never places orders itself. It only
+> pre-fills the order panel; you still press Buy/Sell + Confirm. Trailing
+> stop also only runs when you click the button.
 
-## Fitur
+> **Purpose & ethical scope.** This extension is purely an analysis aid: it
+> **reads data already rendered on the page** (price from the tab title,
+> positions from the DOM) and processes it with technical indicators and an
+> LLM/AI model to help you analyze — not to exploit, bypass protections, or
+> damage the platform. No hidden scraping, no order manipulation, no access
+> beyond what WebTerminal already grants its own user. Compliance with the
+> broker's ToS remains your responsibility.
 
-- **Candle builder M15** — sampling tick harga dari halaman WebTerminal,
-  disimpan di `chrome.storage.local` (+ backfill riwayat candle).
-- **Indikator teknikal** — SMA9/SMA21, RSI14, ATR14, Bollinger Bands, MACD
-  histogram, slope SMA9 (hint arah tren).
-- **Level S/R + breakout** — deteksi support/resistance dari candle, bisa
-  digambar ke chart (garis + label touches).
-- **Pipeline debat 2 tahap** —
-  1. *Analis*: LLM menghasilkan sinyal + confidence + trend + target price +
+## Features
+
+- **M15 candle builder** — samples price ticks from the WebTerminal page,
+  stored in `chrome.storage.local` (+ historical candle backfill).
+- **Technical indicators** — SMA9/SMA21, RSI14, ATR14, Bollinger Bands, MACD
+  histogram, SMA9 slope (trend hint).
+- **S/R levels + breakout** — support/resistance detected from candles,
+  drawable on the chart (lines + touch labels).
+- **2-stage debate pipeline** —
+  1. *Analyst*: LLM produces a signal + confidence + trend + target price +
      `keyRisks`.
-  2. *Pendebat kontrarian*: LLM kedua mencoba membantah pakai data yang sama;
-     kalau menolak dan punya sinyal alternatif, verdict final dihitung di JS
-     (`decideFinal`).
-  Prosesnya transparan — 3 baris debat tampil di side panel (blok collapsible),
-  tersimpan di `lastSignal.process`.
-- **Visual pro di chart** — garis tren historis + panah/target prediksi
-  (hanya untuk sinyal non-WAIT), rencana posisi (entry/SL/TP) digambar sebagai
-  overlay.
-- **Side panel kontrol penuh** — Analyze Now, backfill, gambar/hapus S/R &
-  posisi & tren, trailing stop, export CSV log sinyal, dan **Settings**.
-- **Settings runtime** — volume, SL/TP default, min SL, trailing, loop interval,
-  model, **LLM Base URL + API key** (kosong = fallback ke `config.js`).
-- **Loop otomatis** — `chrome.alarms` menjalankan analisa tiap
-  `loopIntervalMin` menit (default 15), tahan SW MV3 tetap hidup.
+  2. *Contrarian debater*: a second LLM tries to refute the analyst using
+     the same data; if it disagrees and proposes an alternative, the final
+     verdict is computed in JS (`decideFinal`).
+  The process is transparent — 3 debate lines show in the side panel
+  (collapsible block), stored in `lastSignal.process`.
+- **Pro chart visuals** — historical trend line + prediction arrow/target
+  (only for non-WAIT signals); position plan (entry/SL/TP) drawn as overlay.
+- **Full-control side panel** — Analyze Now, backfill, draw/clear S/R &
+  position & trend, trailing stop, CSV signal log export, and **Settings**.
+- **Runtime settings** — volume, default SL/TP, min SL, trailing, loop
+  interval, model, **LLM Base URL + API key** (empty = fall back to
+  `config.js`).
+- **Auto loop** — `chrome.alarms` runs analysis every `loopIntervalMin`
+  minutes (default 15); survives MV3 SW termination.
 
-## Struktur
+## Structure
 
 ```
 extension/
-  manifest.json        MV3, side panel, content script Exness
-  background.js        SW: router pesan, pipeline analisa, LLM, chart drawing
-  content.js           MAIN-world bridge: tick harga, overlay, order panel
-  panel.js             controller bersama popup & side panel
-  indicators.js        hitung indikator + slope + ringkasan 5 candle
-  candle-builder.js    agregasi tick → candle M15
-  sr.js                deteksi level S/R
+  manifest.json        MV3, side panel, Exness content script
+  background.js        SW: message router, analysis pipeline, LLM, chart drawing
+  content.js           MAIN-world bridge: price ticks, overlay, order panel
+  panel.js             shared controller for popup & side panel
+  indicators.js        compute indicators + slope + 5-candle shape
+  candle-builder.js    aggregate ticks → M15 candles
+  sr.js                S/R level detection
   settings.js          defaults + sanitize + storage.sync
-  config.js            nilai live — GIT-IGNORED, jangan commit
-  config.example.js    template — cp ke config.js lalu isi
-  sidepanel.html       UI side panel
-  popup.html           UI popup (subset panel)
+  config.js            live values — GIT-IGNORED, never commit
+  config.example.js    template — cp to config.js then fill in
+  sidepanel.html       side panel UI
+  popup.html           popup UI (subset of panel)
 dev/
   launch-brave.sh      Brave + remote debugging 9222 + load extension
-  watch-reload.mjs     watcher: save file → reload SW + tab Exness
-  cdp.mjs              helper CDP (eval, console, sniff, panel, sw)
+  watch-reload.mjs     watcher: save file → reload SW + Exness tab
+  cdp.mjs              CDP helper (eval, console, sniff, panel, sw)
 ```
 
-> `prd.md` (spesifikasi asli + catatan keputusan) ada di repo tapi
-> **git-ignored** — dokumen internal, tidak ikut dilacak.
+> `prd.md` (original spec + decision notes) lives in the repo but is
+> **git-ignored** — internal document, not tracked.
 
 ## Setup
 
-### 1. Config LLM
+### 1. LLM config
 
 ```bash
 cd extension
 cp config.example.js config.js
-# edit config.js — isi LLM_BASE_URL + LLM_API_KEY milikmu
+# edit config.js — fill in your LLM_BASE_URL + LLM_API_KEY
 ```
 
-`config.js` ada di `.gitignore` — secret tidak pernah masuk repo. Semua nilai
-(Base URL, API key, model) juga bisa dioverride runtime dari **Settings** di
-side panel; nilai kosong di settings = pakai default `config.js`.
+`config.js` is in `.gitignore` — secrets never enter the repo. Every value
+(Base URL, API key, model) can also be overridden at runtime from the
+**Settings** panel; empty there = use the `config.js` default.
 
-### 2. Load extension
+### 2. Load the extension
 
-**Cara dev (recommended):**
+**Dev mode (recommended):**
 
 ```bash
 ./dev/launch-brave.sh
 ```
 
-Meluncurkan Brave (auto-detect `brave-origin-stable`) dengan profile dev
-terpisah (`~/.brave-trading-dev`), remote debugging di port 9222, dan extension
-ter-preload. Login Exness cukup sekali per profile.
+Launches Brave (auto-detects `brave-origin-stable`) with a separate dev
+profile (`~/.brave-trading-dev`), remote debugging on port 9222, and the
+extension preloaded. Exness login is only needed once per profile.
 
-**Cara manual:** `chrome://extensions` → Developer mode → Load unpacked →
-pilih folder `extension/`.
+**Manual:** `chrome://extensions` → Developer mode → Load unpacked → pick
+the `extension/` folder.
 
 ### 3. Dev loop
 
 ```bash
-node dev/watch-reload.mjs   # terminal 1 (opsional)
+node dev/watch-reload.mjs   # terminal 1 (optional)
 ```
 
-Simpan file di `extension/` → service worker + tab Exness auto-reload.
-Watcher menemukan port CDP dari `BRAVE_DEV_PORT`, file `DevToolsActivePort`
-di profile Brave, atau default 9222.
+Save any file under `extension/` → the service worker + Exness tab
+auto-reload. The watcher resolves the CDP port from `BRAVE_DEV_PORT`, the
+`DevToolsActivePort` file in the Brave profile, or falls back to 9222.
 
-Debug helper:
+Debug helpers:
 
 ```bash
-node dev/cdp.mjs eval "document.title"      # eval di tab Exness
-node dev/cdp.mjs console                    # dump log console
-node dev/cdp.mjs sniff                      # capture network 8s
+node dev/cdp.mjs eval "document.title"      # eval in the Exness tab
+node dev/cdp.mjs console                    # dump console logs
+node dev/cdp.mjs sniff                      # capture network for 8s
 ```
 
-> Catatan MV3: service worker yang dormant hilang dari daftar target CDP — itu
-> normal, bukan crash. Reload tab Exness untuk membangunkannya.
+> MV3 note: a dormant service worker disappears from the CDP target list —
+> that's normal, not a crash. Reload the Exness tab to wake it.
 
-## Cara pakai
+## Usage
 
-1. Buka Exness WebTerminal di browser dev, login.
-2. Klik ikon extension → side panel terbuka (atau buka `sidepanel.html`).
-3. **Analyze Now** → pipeline berjalan (~45–120s, 2 panggilan LLM + retry):
-   - indikator + level dihitung dari candle tersimpan,
-   - analis menghasilkan verdict,
-   - pendebat mencoba membantah,
-   - final verdict + debat tampil di panel, visual digambar ke chart.
-4. **Gambar S/R** / **Gambar Posisi** untuk overlay visual; pasangkan tombol
-   Clear untuk menghapus.
-5. **Isi Order** menyiapkan panel order di WebTerminal sesuai sinyal terakhir —
-   **kamu tetap yang konfirmasi**.
-6. **Trail SL** menggeser SL semua posisi mengikuti harga.
-7. Settings (gear): volume, SL/TP, trailing, interval loop, model, LLM
-   endpoint/key. Save untuk persist (chrome.storage.sync).
+1. Open Exness WebTerminal in the dev browser, log in.
+2. Click the extension icon → side panel opens (or open `sidepanel.html`).
+3. **Analyze Now** → the pipeline runs (~45–120s, 2 LLM calls + retry):
+   - indicators + levels computed from stored candles,
+   - analyst produces a verdict,
+   - debater tries to refute it,
+   - final verdict + debate show in the panel, visuals drawn on the chart.
+4. **Draw S/R** / **Draw Position** for visual overlays; pair with the
+   Clear buttons to remove.
+5. **Fill Order** pre-fills the WebTerminal order panel per the latest
+   signal — **you still confirm**.
+6. **Trail SL** shifts SL on all open positions to follow price.
+7. Settings (gear): volume, SL/TP, trailing, loop interval, model, LLM
+   endpoint/key. Save to persist (chrome.storage.sync).
 
-## Arsitektur singkat
+## Architecture overview
 
 ```
 content.js (Exness page)          background.js (SW, ES module)
@@ -144,87 +146,91 @@ content.js (Exness page)          background.js (SW, ES module)
   ├─ REQUEST_SIGNAL ◀────────────▶ runAnalysis():
   │                                  computeIndicators → computeLevels
   │                                  → askAnalyst  (LLM #1)
-  │                                  → askDebater  (LLM #2, kontrarian)
+  │                                  → askDebater  (LLM #2, contrarian)
   │                                  → decideFinal (JS)
-  ├─ DRAW_SR / DRAW_POSITION /     → scripting.inject, gambar di chart
+  ├─ DRAW_SR / DRAW_POSITION /     → scripting.inject, draw on chart
   │   DRAW_TREND (+CLEAR_*)
-  ├─ PREPARE_ORDER                 → isi panel order (tanpa submit)
-  └─ TRAIL_STOPS                   → modify SL posisi terbuka
+  ├─ PREPARE_ORDER                 → pre-fill order panel (no submit)
+  └─ TRAIL_STOPS                   → modify SL on open positions
 ```
 
-- `chrome.storage.local` — candle, sinyal, posisi, state analisa.
-- `chrome.storage.sync` — settings (ikut akun Chrome).
-- `chrome.alarms` — loop analisa otomatis; alarm selamat dari SW restart.
+- `chrome.storage.local` — candles, signals, positions, analysis state.
+- `chrome.storage.sync` — settings (follows the Chrome account).
+- `chrome.alarms` — auto analysis loop; alarms survive SW restarts.
 
-## Keamanan & batasan
+## Security & limitations
 
-- **Tidak ada auto-trade.** Order selalu butuh klik manual; extension hanya
-  menyiapkan panel.
-- **`config.js` git-ignored.** API key hanya hidup di mesinmu (atau override
-  via Settings panel, tersimpan di `chrome.storage.sync` akun Chrome).
-- Guard anti-double-run (`analyzing` + `analysisAt` di storage) — tombol
-  Analyze recover sendiri kalau SW mati di tengah analisa.
-- LLM proxy bisa flaky (SSE terpotong, reasoning model jawab di
-  `reasoning_content`) — `readLLMBody`/`parseLLMJson` toleran + retry 3×.
-- Kegagalan stage debat bersifat non-fatal; kegagalan analis jatuh ke
-  fallback heuristik.
-- **Demo first.** Dirancang untuk diuji di akun demo dulu.
+- **No auto-trade.** Orders always require a manual click; the extension
+  only pre-fills the panel.
+- **`config.js` is git-ignored.** API keys live only on your machine (or
+  override via the Settings panel, stored in your Chrome account's
+  `chrome.storage.sync`).
+- Anti-double-run guard (`analyzing` + `analysisAt` in storage) — the
+  Analyze button self-recovers if the SW dies mid-analysis.
+- The LLM proxy can be flaky (truncated SSE, reasoning models answering in
+  `reasoning_content`) — `readLLMBody`/`parseLLMJson` are tolerant + 3×
+  retry.
+- Debate-stage failure is non-fatal; analyst failure falls back to a
+  heuristic signal.
+- **Demo first.** Designed to be tested on a demo account first.
 
-## Dependensi
+## Dependencies
 
-**Nol dependency eksternal** — tidak ada `package.json`, tidak ada library,
-tidak ada build step. Semua kode JavaScript ES2022 native.
+**Zero external dependencies** — no `package.json`, no libraries, no build
+step. All code is native ES2022 JavaScript.
 
-API platform yang dipakai:
+Platform APIs used:
 
-| API | Pakai untuk |
+| API | Used for |
 |---|---|
-| `chrome.storage` (local/sync) | candle, sinyal, settings |
-| `chrome.alarms` | loop analisa otomatis |
-| `chrome.scripting` + `chrome.sidePanel` | injeksi chart, side panel |
-| `fetch` / `WebSocket` (dev) | LLM proxy, kalender, CDP |
+| `chrome.storage` (local/sync) | candles, signals, settings |
+| `chrome.alarms` | auto analysis loop |
+| `chrome.scripting` + `chrome.sidePanel` | chart injection, side panel |
+| `fetch` / `WebSocket` (dev) | LLM proxy, calendar, CDP |
 
-Service eksternal:
+External services:
 
-| Service | Fungsi |
+| Service | Purpose |
 |---|---|
-| LLM proxy (OpenAI-compatible, user-own) | analisa + debat |
-| [FXMacroData](https://api.fxmacrodata.com) | kalender ekonomi USD high-impact (gratis, no key) |
-| Exness WebTerminal | sumber harga, chart, posisi, order |
+| LLM proxy (OpenAI-compatible, user-owned) | analysis + debate |
+| [FXMacroData](https://api.fxmacrodata.com) | USD high-impact economic calendar (free, no key) |
+| Exness WebTerminal | price source, chart, positions, orders |
 
-## Roadmap (dari PRD)
+## Roadmap (from PRD)
 
 | Item | Status |
 |---|---|
-| Price sampling + candle M15 + indikator | ✅ |
-| Analisa LLM + pipeline debat 2 tahap | ✅ |
-| Overlay visual (S/R, posisi, tren) | ✅ |
-| Side panel + settings runtime | ✅ |
+| Price sampling + M15 candles + indicators | ✅ |
+| LLM analysis + 2-stage debate pipeline | ✅ |
+| Visual overlays (S/R, position, trend) | ✅ |
+| Side panel + runtime settings | ✅ |
 | Trailing stop (manual trigger) | ✅ |
-| Eksekusi order via rtapi Exness | ⏳ router ada (`EXECUTE_ORDER`), logika belum |
-| Multi-symbol / broker lain | ❌ out of scope — Exness-only by design |
-| Auto-execute tanpa konfirmasi | ❌ tidak akan pernah, by design |
+| Order execution via Exness rtapi | ⏳ router exists (`EXECUTE_ORDER`), logic not yet |
+| Multi-symbol / other brokers | ❌ out of scope — Exness-only by design |
+| Auto-execute without confirmation | ❌ never, by design |
 
-Prinsip desain: Linux native, zero cost, zero install, transparan (user lihat
-indikator + alasan + debat LLM), token session dibaca fresh tanpa disimpan,
-manual confirm selalu.
+Design principles: Linux native, zero cost, zero install, transparent (user
+sees indicators + LLM reasoning + debate), session token read fresh never
+stored, manual confirm always.
 
 ## Disclaimer
 
-Proyek ini **tidak berafiliasi dengan Exness**, TradingView, maupun penyedia
-LLM yang dipakai. Semua merek adalah milik pemiliknya.
+This project is **not affiliated with Exness**, TradingView, or any LLM
+provider. All trademarks belong to their owners.
 
-- **Tidak menjanjikan profit.** Apapun output LLM-nya — sinyal, confidence,
-  target price — itu bukan jaminan apa pun. Extension ini hanya memindahkan
-  kerja analisa ke AI; hasilnya tetap bisa salah, dan pasar bisa melawan
-  sinyal terbaik sekalipun.
-- **Bukan alat "auto-cuan".** Yang extension ini berikan cuma satu hal:
-  kamu bisa pakai LLM yang terintegrasi langsung dengan WebTerminal — data
-  chart nyata masuk ke prompt, verdict kembali ke chart. Selebihnya (kapan
-  entry, risk, disiplin) tetap keputusan dan tanggung jawabmu.
-- **Sinyal LLM bukan nasihat keuangan.** Trading emas berisiko tinggi, uji
-  di akun demo dulu, tanggung jawab sepenuhnya milik pengguna.
+- **No profit promise.** Whatever the LLM outputs — signal, confidence,
+  target price — is not a guarantee of anything. This extension only moves
+  analysis work to AI; results can still be wrong, and the market can move
+  against even the best signal.
+- **Not a "get-rich" tool.** The one thing this extension gives you: you
+  can use an LLM integrated directly with WebTerminal — real chart data
+  goes into the prompt, the verdict comes back to the chart. Everything
+  else (when to enter, risk, discipline) remains your decision and
+  responsibility.
+- **LLM signals are not financial advice.** Gold trading is high-risk;
+  test on a demo account first; responsibility lies entirely with the
+  user.
 
-## Lisensi
+## License
 
-[MIT](LICENSE) — kode 100% original, zero dependency, bebas dipakai/modifikasi.
+[MIT](LICENSE) — 100% original code, zero dependencies, free to use/modify.
