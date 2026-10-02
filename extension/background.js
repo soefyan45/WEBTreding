@@ -254,9 +254,14 @@ async function drawSupportResistance() {
     if (candles.length < 30) {
       const bf = await requestBackfill();
       if (bf.ok) candles = await getCandles();
+      else
+        return {
+          ok: false,
+          error: `Candle belum cukup (${candles.length}/30) — backfill gagal: ${bf.error}`
+        };
     }
     if (candles.length < 30)
-      return { ok: false, error: "Candle belum cukup (min 30). Klik Backfill dulu." };
+      return { ok: false, error: `Candle belum cukup (${candles.length}/30). Klik Backfill dulu.` };
     const levels = computeLevels(candles);
     payload = { supports: levels.supports, resistances: levels.resistances, breakout: null, breakdown: null, bandHint };
   }
@@ -341,6 +346,7 @@ async function paintSrLines(levels) {
       const edge  = isSupport ? "#089981" : "#F23645";
       const text = `${isSupport ? "S" : "R"} ${level.price.toFixed(3)} (${level.touches}x)`;
       const top = level.price + halfBand, bot = level.price - halfBand;
+      const errors = [];
       try {
         // Filled zone (the professional "channel" look), spanning the full view.
         // createShape rejects 2 points for rectangle — must use createMultipointShape.
@@ -355,6 +361,8 @@ async function paintSrLines(levels) {
             }
           }
         );
+      } catch (e) { errors.push(`band ${text}: ${e.message}`); }
+      try {
         // Solid edge line at the exact level for a crisp price tag
         await chart.createShape(
           { text, points: [{ time: leftTime, price: level.price }], zorder: "top" },
@@ -363,16 +371,18 @@ async function paintSrLines(levels) {
             overrides: { linecolor: edge, linewidth: 2, linestyle: level.touches >= 3 ? 0 : 2, showLabel: true, text, textcolor: edge, toptext: true }
           }
         );
-      } catch { /* keep painting the rest even if one fails */ }
+      } catch (e) { errors.push(`line ${text}: ${e.message}`); }
+      return errors;
     };
 
-    for (const l of levels.supports) await paint(l, "support");
-    for (const l of levels.resistances) await paint(l, "resistance");
+    const paintErrors = [];
+    for (const l of levels.supports) paintErrors.push(...(await paint(l, "support")));
+    for (const l of levels.resistances) paintErrors.push(...(await paint(l, "resistance")));
 
     // Break lines from the analysis: dotted, orange, labelled so the trigger
     // price is unmistakable next to the plain S/R levels.
     const paintBreak = async (price, label) => {
-      if (price == null) return;
+      if (price == null) return [];
       try {
         await chart.createShape(
           { text: `${label} ${price.toFixed(3)}`, points: [{ time: leftTime, price }], zorder: "top" },
@@ -391,18 +401,19 @@ async function paintSrLines(levels) {
             }
           }
         );
-      } catch {
-        /* keep the rest */
-      }
+      } catch (e) { return [`${label}: ${e.message}`]; }
+      return [];
     };
-    await paintBreak(levels.breakout, "BREAK↑");
-    await paintBreak(levels.breakdown, "BREAK↓");
+    paintErrors.push(...(await paintBreak(levels.breakout, "BREAK↑")));
+    paintErrors.push(...(await paintBreak(levels.breakdown, "BREAK↓")));
 
     // 5. Anything that appeared is ours.
     const after = await chart.getAllShapes();
     const ids = after.map((s) => s.id).filter((id) => !before.has(id));
     window.__aiSrIds = ids;
-    return { ok: true, drawn: ids.length };
+    if (!ids.length)
+      return { ok: false, error: paintErrors[0] || "Tidak ada shape tergambar (chart API reject diam-diam)" };
+    return { ok: true, drawn: ids.length, errors: paintErrors };
   } catch (e) {
     return { ok: false, error: e.message };
   }
