@@ -435,6 +435,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // Service worker asks content script to backfill on startup.
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "PING") {
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (msg.type === "BACKFILL_REQUEST") {
     backfillCandles(msg.timeFrameSec, msg.count)
       .then((candles) => sendResponse({ ok: true, candles }))

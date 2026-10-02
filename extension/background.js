@@ -15,25 +15,60 @@ chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((e) => console.error("[AI-TS] sidePanel behavior", e));
 
+// --- Exness tab readiness --------------------------------------------------
+// Fresh install: the WebTerminal tab was often opened *before* the extension
+// loaded, so content.js never injected and there is no message listener. Rather
+// than telling the user to reload the tab, we ping; if nobody answers, inject
+// content.js ourselves and retry. Concurrent callers share one injection.
+const injectionInFlight = new Map(); // tabId -> Promise
+
+async function exnessTabReady() {
+  const tabs = await chrome.tabs.query({ url: "https://my.exness.com/webtrading/*" });
+  if (!tabs.length)
+    return { error: "Tab Exness belum terbuka — buka my.exness.com/webtrading", stage: "tab" };
+  const tab = tabs[0];
+
+  const ping = () => chrome.tabs.sendMessage(tab.id, { type: "PING" });
+  try {
+    await ping();
+    return { tab };
+  } catch {
+    /* no listener — inject below */
+  }
+
+  try {
+    let job = injectionInFlight.get(tab.id);
+    if (!job) {
+      job = chrome.scripting
+        .executeScript({ target: { tabId: tab.id }, files: ["content.js"] })
+        .finally(() => injectionInFlight.delete(tab.id));
+      injectionInFlight.set(tab.id, job);
+    }
+    await job;
+    await ping(); // confirm the listener registered
+    return { tab, injected: true };
+  } catch (e) {
+    return { error: `Gagal inject content script ke tab Exness (${e.message})`, stage: "content" };
+  }
+}
+
 // --- Backfill: pull M15 history from the Exness tab (it holds the auth) ----
 // Diagnostics: every stage reports so the user sees *which* step failed
 // (tab open? content script injected? auth present? rtapi status code?),
 // not one generic "check tab" message.
 async function requestBackfill() {
-  const tabs = await chrome.tabs.query({ url: "https://my.exness.com/webtrading/*" });
-  if (!tabs.length)
-    return { ok: false, error: "Tab Exness belum terbuka — buka my.exness.com/webtrading", stage: "tab" };
+  const ready = await exnessTabReady();
+  if (!ready.tab) return { ok: false, error: ready.error, stage: ready.stage };
 
   let res;
   try {
-    res = await chrome.tabs.sendMessage(tabs[0].id, {
+    res = await chrome.tabs.sendMessage(ready.tab.id, {
       type: "BACKFILL_REQUEST",
       timeFrameSec: CONFIG.TIMEFRAME_MIN * 60,
       count: 300
     });
   } catch (e) {
-    // No listener — either content script still loading or auth/DOM not ready.
-    return { ok: false, error: `Content script belum siap (${e.message}) — reload tab Exness`, stage: "content" };
+    return { ok: false, error: `Content script tidak merespons (${e.message})`, stage: "content" };
   }
 
   if (!res?.ok) {
@@ -158,10 +193,10 @@ async function refreshAlarm(settings) {
 // Fill the Exness order panel from the latest signal. The user still clicks
 // Buy/Sell + Confirm themselves — this never places an order.
 async function prepareOrder() {
-  const tabs = await chrome.tabs.query({ url: "https://my.exness.com/webtrading/*" });
-  if (!tabs.length) return { ok: false, error: "Tab Exness tidak terbuka" };
+  const ready = await exnessTabReady();
+  if (!ready.tab) return { ok: false, error: ready.error };
   try {
-    return await chrome.tabs.sendMessage(tabs[0].id, { type: "PREPARE_ORDER" });
+    return await chrome.tabs.sendMessage(ready.tab.id, { type: "PREPARE_ORDER" });
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -170,10 +205,10 @@ async function prepareOrder() {
 // Manual trailing stop: moves SL to TRAIL_DISTANCE_PIPS behind current price.
 // Only runs when the user presses the button — never on a timer.
 async function trailStops() {
-  const tabs = await chrome.tabs.query({ url: "https://my.exness.com/webtrading/*" });
-  if (!tabs.length) return { ok: false, error: "Tab Exness tidak terbuka" };
+  const ready = await exnessTabReady();
+  if (!ready.tab) return { ok: false, error: ready.error };
   try {
-    return await chrome.tabs.sendMessage(tabs[0].id, { type: "TRAIL_STOPS" });
+    return await chrome.tabs.sendMessage(ready.tab.id, { type: "TRAIL_STOPS" });
   } catch (e) {
     return { ok: false, error: e.message };
   }
