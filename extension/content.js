@@ -179,6 +179,36 @@ function inputInWrap(wrapSel) {
   return wrap ? wrap.querySelector('[data-test="input"]') : null;
 }
 
+// The order panel lets each SL/TP field be entered as Price or Pips via a
+// dropdown button (data-test="dropdown-button", label "Price" by default).
+// Our values are pip magnitudes, so make sure the field is in Pips mode
+// before writing them — otherwise -160 is read as a floor price and rejected.
+async function switchToPips(wrapSel) {
+  const wrap = document.querySelector(wrapSel);
+  if (!wrap) return;
+  const btn = wrap.querySelector('[data-test="dropdown-button"]');
+  if (!btn) return;
+  const label = btn.textContent || "";
+  if (/pip/i.test(label)) return "pips"; // already in Pips mode
+
+  // Open the menu and pick the Pips option. Defensive: if the menu item
+  // never appears, we just leave the field as-is rather than failing.
+  btn.click();
+  await new Promise((r) => setTimeout(r, 200));
+  const candidates = document.querySelectorAll(
+    '[role="menuitem"], [role="option"], [data-test="menu-item"], [data-test^="menu-"], li'
+  );
+  const pips = [...candidates].find((el) => /pips?$/i.test((el.textContent || "").trim()));
+  let applied = false;
+  if (pips) {
+    pips.click();
+    await new Promise((r) => setTimeout(r, 200));
+    applied = true;
+  }
+  // If the toggle landed, the button label now reads "Pips".
+  return applied ? "pips" : label || "unknown";
+}
+
 // Click the panel's Buy/Sell price button so the confirmation matches the
 // signal side. The active button carries class OrderButton_active__*.
 // React re-renders asynchronously, so poll for the class to flip.
@@ -209,6 +239,10 @@ async function fillOrderPanel({ volume, slPips, tpPips }) {
 
   setNativeInput(volEl, volume);
 
+  // SL/TP are pip values — force both fields into Pips mode first.
+  const slMode = await switchToPips(ORDER_PANEL.slWrap);
+  const tpMode = await switchToPips(ORDER_PANEL.tpWrap);
+
   let slApplied = false;
   let tpApplied = false;
   const slEl = inputInWrap(ORDER_PANEL.slWrap);
@@ -238,7 +272,8 @@ async function fillOrderPanel({ volume, slPips, tpPips }) {
     ok: true,
     filled: { volume, slPips: -Math.abs(slPips), tpPips: Math.abs(tpPips) },
     slInputApplied: slApplied,
-    tpInputApplied: tpApplied
+    tpInputApplied: tpApplied,
+    modes: { sl: slMode, tp: tpMode }
   };
 }
 
