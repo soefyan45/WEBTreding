@@ -1,6 +1,9 @@
 # secrets — never commit the live config
 extension/config.js
 
+# internal spec — local reference only
+prd.md
+
 # node
 node_modules/
 
