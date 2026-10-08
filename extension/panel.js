@@ -335,7 +335,8 @@ const SET_FIELDS = {
   setModel: "model",
   setLlmUrl: "llmBaseUrl",
   setLlmKey: "llmApiKey",
-  setLoop: "loopIntervalMin"
+  setLoop: "loopIntervalMin",
+  setManualNote: "manualNote"
 };
 
 async function loadSettingsForm() {

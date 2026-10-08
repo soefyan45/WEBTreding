@@ -12,7 +12,8 @@ export const SETTINGS_DEFAULTS = {
   model: "combos-auto", // LLM model id at the proxy
   loopIntervalMin: 15, // analysis cadence
   llmBaseUrl: "", // empty = CONFIG.LLM_BASE_URL
-  llmApiKey: "" // empty = CONFIG.LLM_API_KEY
+  llmApiKey: "", // empty = CONFIG.LLM_API_KEY
+  manualNote: "" // trader's freeform note injected into the LLM prompts
 };
 
 // Coerce user input to sane numbers so a bad value can't break the pipeline.
@@ -33,7 +34,9 @@ function sanitize(raw) {
     model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : d.model,
     loopIntervalMin: num(raw.loopIntervalMin, d.loopIntervalMin, 1, 240),
     llmBaseUrl: typeof raw.llmBaseUrl === "string" ? raw.llmBaseUrl.trim() : "",
-    llmApiKey: typeof raw.llmApiKey === "string" ? raw.llmApiKey.trim() : ""
+    llmApiKey: typeof raw.llmApiKey === "string" ? raw.llmApiKey.trim() : "",
+    manualNote:
+      typeof raw.manualNote === "string" ? raw.manualNote.slice(0, 1000) : d.manualNote
   };
 }
 

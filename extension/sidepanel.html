@@ -65,6 +65,11 @@
         border: 1px solid #30363D; border-radius: 4px; padding: 4px 6px;
         font-family: inherit; font-size: 11px;
       }
+      .settings textarea {
+        width: 100%; background: #161B22; color: #E6EDF3;
+        border: 1px solid #30363D; border-radius: 4px; padding: 6px;
+        font-family: inherit; font-size: 11px; resize: vertical;
+      }
     </style>
   </head>
   <body>
@@ -133,6 +138,11 @@
       <label>LLM Base URL<input id="setLlmUrl" type="url" placeholder="kosong = default config.js" /></label>
       <label>LLM API Key<input id="setLlmKey" type="password" placeholder="kosong = default config.js" /></label>
       <label>Loop interval (min)<input id="setLoop" type="number" step="1" min="1" max="240" /></label>
+      <div class="settings-title">Catatan Trader</div>
+      <div class="muted" style="padding:0 0 4px">
+        Disuntik ke prompt analis &amp; pendebat. Baris baru = 1 catatan terpisah.
+      </div>
+      <textarea id="setManualNote" rows="4" placeholder="Contoh:&#10;Jangan SELL sebelum-news 20:30&#10;Volume harus &gt;1.5x rata-rata sebelum entry&#10;-resistance 4143 adalah kunci; breakout baru valid di atas 4145"></textarea>
       <div class="row">
         <button id="saveSettingsBtn" class="primary">Save</button>
         <button id="resetSettingsBtn">Reset</button>

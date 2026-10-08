@@ -1004,7 +1004,46 @@ const fmtLevels = (arr) =>
     ? arr.map((l) => `${l.price.toFixed(3)} (${l.touches}x sentuh)`).join(", ")
     : "tidak ada";
 
-function buildAnalystPrompt(ind, news, levels) {
+// Shared context injected into the analyst AND debater prompts: the trader's
+// manual note, the last 5 signals (with how each debate resolved), and any
+// open positions. Returns "" when everything is empty so the section is
+// skipped entirely (no wasted tokens).
+async function buildContextBlock(settings) {
+  const parts = [];
+
+  const note = (settings.manualNote || "").trim();
+  if (note) parts.push(`CATATAN TRADER:\n${note}`);
+
+  const { signals = [] } = await chrome.storage.local.get("signals");
+  const recent = signals.filter((s) => s.signal).slice(0, 5);
+  if (recent.length) {
+    const lines = recent.map((s, i) => {
+      const mins = Math.max(1, Math.round((Date.now() - s.timestamp) / 60000));
+      const flip = s.debate
+        ? s.debate.flips
+          ? ` -> debat: ${s.debate.flips}`
+          : " -> debat setuju"
+        : "";
+      const price = s.priceAtSignal ?? s.indicators?.price ?? "?";
+      return `[${i + 1}] ${mins}m lalu: ${s.signal} ${Math.round((s.confidence || 0) * 100)}% @ ${price}${flip}`;
+    });
+    parts.push(`5 SINYAL TERAKHIR:\n${lines.join("\n")}`);
+  }
+
+  const { positions = [] } = await chrome.storage.local.get("positions");
+  if (positions.length) {
+    const lines = positions.map(
+      (p) =>
+        `${p.side} ${p.volume} lot entry ${p.entry} sekarang ${p.current} (P/L ${p.profitLoss})`
+    );
+    parts.push(`POSISI TERBUKA:\n${lines.join("\n")}`);
+  }
+
+  if (!parts.length) return "";
+  return `KONTEKS DATA TERKUMPUL (pertimbangkan saat menyusun analisa & risiko):\n${parts.join("\n\n")}`;
+}
+
+function buildAnalystPrompt(ind, news, levels, ctx) {
   return `Kamu senior market analis XAUUSD M15 (gold) dengan pengalaman 15 tahun. Output JSON saja.
 
 DATA PASAR:
@@ -1022,7 +1061,7 @@ ${news}
 LEVEL S/R TEKNIS (swing M15, kandidat):
 SUPPORT: ${fmtLevels(levels.supports)}
 RESISTANCE: ${fmtLevels(levels.resistances)}
-
+${ctx ? `\n${ctx}\n` : ""}
 METODOLOGI (urutkan proses berpikirmu):
 1. Tren: baca slope SMA9 + posisi harga vs SMA9/SMA21 -> trend UP/DOWN/FLAT.
 2. Momentum: RSI + MACD hist + posisi vs Bollinger.
@@ -1044,7 +1083,7 @@ Format: {"signal":"BUY|SELL|WAIT","confidence":0.0-1.0,"reason":"...","trend":"U
 
 // The debater gets the SAME market data plus the analyst's full output, and is
 // told to attack it with numbers, not opinions.
-function buildDebaterPrompt(ind, news, levels, analyst) {
+function buildDebaterPrompt(ind, news, levels, analyst, ctx) {
   return `Kamu pendebat kontrarian senior di desk XAUUSD M15. Tugasmu MENYERANG analisa bawah — bukan sekadar setuju. Output JSON saja.
 
 DATA PASAR (sumber kebenaran):
@@ -1059,7 +1098,7 @@ KALENDER HIGH-IMPACT 24 JAM:
 ${news}
 SUPPORT: ${fmtLevels(levels.supports)}
 RESISTANCE: ${fmtLevels(levels.resistances)}
-
+${ctx ? `\n${ctx}\n` : ""}
 ANALISA YANG DIBANTAH:
 ${JSON.stringify(analyst)}
 
@@ -1069,6 +1108,7 @@ ATURAN PENDABAT:
 3. agree = true hanya kalau bantahanmu kalah kuat.
 4. flips = sinyal yang menurutmu lebih benar ("BUY"/"SELL"/"WAIT"); null kalau kamu setuju.
 5. confidence = keyakinanmu terhadap posisimu (0-1).
+6. Gunakan KONTEKS DATA TERKUMPUL sebagai amunisi bantahan: kalau analis mengabaikan CATATAN TRADER atau bertentangan dengan hasil debat sebelumnya, tolak analisanya (horisontal: konsistensi dengan debat lalu). Jangan setuju hanya karena analis mengulang sinyal debater yang gagal sebelumnya.`;
 
 Format: {"agree":true|false,"counter":"1 kalimat bantahan terkuat berbasis angka","confidence":0.0-1.0,"flips":null|"BUY"|"SELL"|"WAIT"}`;
 }
@@ -1097,7 +1137,7 @@ function decideFinal(analyst, debate) {
 }
 
 async function askAnalyst(ind, news, levels, settings) {
-  const prompt = buildAnalystPrompt(ind, news, levels);
+  const prompt = buildAnalystPrompt(ind, news, levels, await buildContextBlock(settings));
 
   // The proxy (combo routing) is flaky: it occasionally returns an empty
   // choice, a truncated JSON tail, or takes too long. Retry with a fresh
@@ -1144,7 +1184,7 @@ async function askAnalyst(ind, news, levels, settings) {
 // Stage 2: the contrarian debater. Failure is non-fatal — runAnalysis keeps the
 // analyst's verdict and annotates it.
 async function askDebater(ind, news, levels, analyst, settings) {
-  const prompt = buildDebaterPrompt(ind, news, levels, analyst);
+  const prompt = buildDebaterPrompt(ind, news, levels, analyst, await buildContextBlock(settings));
   let lastErr;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const ctrl = new AbortController();
@@ -1277,6 +1317,9 @@ async function pushLog(entry) {
     reason: entry.reason,
     indicators: entry.indicators,
     priceAtSignal: entry.indicators?.price,
+    // Debate outcome, kept so the next analysis can learn from past calls.
+    analyst: entry.process?.analyst || null,
+    debate: entry.process?.debate || null,
     executed: false
   });
   if (signals.length > 1000) signals.length = 1000;
