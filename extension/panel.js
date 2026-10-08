@@ -14,9 +14,16 @@ const els = {
   debateToggle: document.getElementById("debateToggle"),
   debateAnalyst: document.getElementById("debateAnalyst"),
   debateCounter: document.getElementById("debateCounter"),
+  debateRounds: document.getElementById("debateRounds"),
   debateFinal: document.getElementById("debateFinal"),
   logList: document.getElementById("logList"),
   analyzeBtn: document.getElementById("analyzeBtn"),
+  debateNowBtn: document.getElementById("debateNowBtn"),
+  previewPromptBtn: document.getElementById("previewPromptBtn"),
+  promptPreview: document.getElementById("promptPreview"),
+  promptText: document.getElementById("promptText"),
+  promptClose: document.getElementById("promptClose"),
+  promptTabs: document.getElementById("promptTabs"),
   fillBtn: document.getElementById("fillBtn"),
   trailBtn: document.getElementById("trailBtn"),
   drawSrBtn: document.getElementById("drawSrBtn"),
@@ -108,6 +115,21 @@ function renderDebate(lastSignal) {
   els.debateCounter.innerHTML = agree
     ? `[2] Pendebat: <span style="color:#00C896;font-weight:700">setuju</span>${p.debate.counter ? ` — ${p.debate.counter}` : ""}`
     : `[2] Pendebat: <span style="color:#FF4757;font-weight:700">menolak</span> — ${p.debate.counter}${p.debate.flips ? ` (maju ${c(p.debate.flips)})` : ""}`;
+
+  // Multi-round transcript (ronde 1..N: counter -> pembelaan analis).
+  const rounds = Array.isArray(p.rounds) ? p.rounds : [];
+  els.debateRounds.innerHTML = rounds.length
+    ? rounds
+        .map((r) => {
+          const tag = r.agree
+            ? `<span style="color:#00C896">setuju</span>`
+            : `<span style="color:#FF4757">menolak${r.flips ? ` → ${c(r.flips)}` : ""}</span>`;
+          const def = r.defense ? ` · analis: ${r.defense}${r.concede ? " (akui)" : ""}` : "";
+          return `<div class="muted" style="margin-top:3px">Ronde ${r.round}: ${tag} — ${r.counter}${def}</div>`;
+        })
+        .join("")
+    : "";
+
   els.debateFinal.innerHTML =
     `[3] Final: ${c(p.final.signal)} ${(p.final.confidence * 100).toFixed(0)}%`;
 }
@@ -204,6 +226,93 @@ els.analyzeBtn.addEventListener("click", async () => {
   } finally {
     render();
   }
+});
+
+// --- Manual debate + prompt template preview --------------------------------
+els.debateNowBtn?.addEventListener("click", async () => {
+  els.debateNowBtn.disabled = true;
+  els.debateNowBtn.textContent = "Debating…";
+  els.debateBlock.hidden = false;
+  els.debateRounds.innerHTML = "";
+  els.debateAnalyst.textContent = "Menjalankan debat manual…";
+  els.debateCounter.textContent = "—";
+  els.debateFinal.textContent = "—";
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "MANUAL_DEBATE" });
+    if (!res?.ok) {
+      els.debateAnalyst.textContent = "Gagal: " + (res?.error || "tidak diketahui");
+    } else {
+      renderManualDebate(res);
+    }
+  } catch (e) {
+    els.debateAnalyst.textContent = "Error: " + e.message;
+  } finally {
+    els.debateNowBtn.disabled = false;
+    els.debateNowBtn.textContent = "Debat Manual";
+  }
+});
+
+// Renders the manual-debate result in the same block the scheduled analysis
+// uses, without touching storage/badge.
+function renderManualDebate(res) {
+  const c = (s) => `<span style="color:${colorFor(s)};font-weight:700">${s}</span>`;
+  const a = res.analyst;
+  const risks = a.keyRisks?.length ? ` — risiko: ${a.keyRisks.join("; ")}` : "";
+  els.debateAnalyst.innerHTML =
+    `[1] Analis: ${c(a.signal)} ${(a.confidence * 100).toFixed(0)}% · tren ${a.trend}` +
+    (a.targetPrice ? ` · target ${fmt(a.targetPrice)}` : "") + risks;
+  const d = res.debate;
+  els.debateCounter.innerHTML = d.agree
+    ? `[2] Pendebat: <span style="color:#00C896;font-weight:700">setuju</span>${d.counter ? ` — ${d.counter}` : ""}`
+    : `[2] Pendebat: <span style="color:#FF4757;font-weight:700">menolak</span> — ${d.counter}${d.flips ? ` (maju ${c(d.flips)})` : ""}`;
+  els.debateRounds.innerHTML = (res.rounds || [])
+    .map((r) => {
+      const tag = r.agree
+        ? `<span style="color:#00C896">setuju</span>`
+        : `<span style="color:#FF4757">menolak${r.flips ? ` → ${c(r.flips)}` : ""}</span>`;
+      const def = r.defense ? ` · analis: ${r.defense}${r.concede ? " (akui)" : ""}` : "";
+      return `<div class="muted" style="margin-top:3px">Ronde ${r.round}: ${tag} — ${r.counter}${def}</div>`;
+    })
+    .join("");
+  els.debateFinal.innerHTML =
+    `[3] Final: ${c(res.final.signal)} ${(res.final.confidence * 100).toFixed(0)}%`;
+}
+
+let promptCache = null;
+function showPromptTab(tab) {
+  if (!promptCache) return;
+  els.promptText.textContent = promptCache[tab] || "(kosong)";
+  els.promptTabs
+    ?.querySelectorAll(".ptab")
+    .forEach((el) => el.classList.toggle("active", el.dataset.tab === tab));
+}
+
+els.previewPromptBtn?.addEventListener("click", async () => {
+  els.previewPromptBtn.disabled = true;
+  els.promptPreview.hidden = false;
+  els.promptText.textContent = "Menyusun template…";
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "PREVIEW_DEBATE_PROMPT" });
+    if (!res?.ok) {
+      els.promptText.textContent = "Gagal: " + (res?.error || "tidak diketahui");
+    } else {
+      promptCache = { analyst: res.analyst, debater: res.debater, defense: res.defense };
+      showPromptTab("analyst");
+    }
+  } catch (e) {
+    els.promptText.textContent = "Error: " + e.message;
+  } finally {
+    els.previewPromptBtn.disabled = false;
+  }
+});
+
+els.promptClose?.addEventListener("click", () => {
+  if (els.promptPreview) els.promptPreview.hidden = true;
+});
+
+els.promptTabs?.addEventListener("click", (e) => {
+  const tab = e.target?.dataset?.tab;
+  if (tab) showPromptTab(tab);
 });
 
 // The popup has no #orderNote; fall back to the reason line so messages still show.

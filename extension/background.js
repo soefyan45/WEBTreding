@@ -187,6 +187,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
+
+  if (msg.type === "MANUAL_DEBATE") {
+    runManualDebate()
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true; // async
+  }
+
+  if (msg.type === "PREVIEW_DEBATE_PROMPT") {
+    previewDebatePrompts()
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true; // async
+  }
 });
 
 // Re-create the analysis alarm whenever loopIntervalMin changes.
@@ -799,6 +813,98 @@ async function runAnalysis() {
   }
 }
 
+// Multi-round debate: the debater attacks, the analyst rebuts, and the
+// exchange repeats until they agree or maxRounds is hit. Returns the last
+// debater verdict plus the round-by-round transcript for the panel.
+async function runDebate(ind, news, levels, analyst, settings, maxRounds = 2) {
+  const ctx = await buildContextBlock(settings);
+  const rounds = [];
+  let debate = null;
+  for (let r = 1; r <= maxRounds; r++) {
+    const prompt = buildDebaterPrompt(ind, news, levels, analyst, ctx, rounds);
+    debate = normDebate(await callLLM(prompt, { settings, temperature: 0.3, maxTokens: 1200 }));
+    if (debate.agree) {
+      rounds.push({ round: r, agree: true, counter: debate.counter, flips: null, defense: null });
+      break;
+    }
+    rounds.push({ round: r, agree: false, counter: debate.counter, flips: debate.flips, defense: null });
+    if (r === maxRounds) break; // last round: no rebuttal round follows
+    const defPrompt = buildDefensePrompt(ind, news, levels, analyst, debate.counter, ctx);
+    const d = normDefense(await callLLM(defPrompt, { settings, temperature: 0.3, maxTokens: 800 }));
+    rounds[rounds.length - 1].defense = d.defense;
+    rounds[rounds.length - 1].concede = d.concede;
+    if (d.concede) break;
+  }
+  return { debate, rounds };
+}
+
+// Shared prep for the panel-driven flows (manual debate, prompt preview).
+async function prepareAnalysisInputs() {
+  let candles = await getCandles();
+  if (candles.length < 30) {
+    const bf = await requestBackfill();
+    if (bf.ok) candles = await getCandles();
+    else return { error: `Candle belum cukup (${candles.length}/30). ${bf.error}` };
+  }
+  const settings = await getSettings();
+  return {
+    candles,
+    indicators: computeIndicators(candles),
+    news: await fetchNews(),
+    settings,
+    levels: computeLevels(candles)
+  };
+}
+
+// Runs a debate on current data WITHOUT touching lastSignal/badge/history —
+// the panel shows the result, the scheduled analysis is unaffected.
+async function runManualDebate() {
+  const prep = await prepareAnalysisInputs();
+  if (prep.error) return { ok: false, error: prep.error };
+  const { indicators, news, levels, settings } = prep;
+
+  const analyst = await askAnalyst(indicators, news, levels, settings);
+  const { debate, rounds } = await runDebate(indicators, news, levels, analyst, settings, 2);
+  const final = decideFinal(analyst, debate);
+
+  return {
+    ok: true,
+    analyst: {
+      signal: analyst.signal,
+      confidence: analyst.confidence,
+      reason: analyst.reason,
+      trend: analyst.trend,
+      targetPrice: analyst.targetPrice,
+      keyRisks: analyst.keyRisks || []
+    },
+    debate,
+    rounds,
+    final: { signal: final.signal, confidence: final.confidence }
+  };
+}
+
+// Renders the exact prompts that would be sent, without calling the LLM.
+async function previewDebatePrompts() {
+  const prep = await prepareAnalysisInputs();
+  if (prep.error) return { ok: false, error: prep.error };
+  const { indicators, news, levels, settings } = prep;
+  const ctx = await buildContextBlock(settings);
+  const analyst = buildAnalystPrompt(indicators, news, levels, ctx);
+  // A representative analyst verdict so the debater prompt has something to
+  // attack in the preview.
+  const stubAnalyst = {
+    signal: "BUY",
+    confidence: 0.7,
+    reason: "(contoh — analyst placeholder)",
+    trend: "UP",
+    targetPrice: indicators.price,
+    keyRisks: ["(contoh) resistance dekat"]
+  };
+  const debater = buildDebaterPrompt(indicators, news, levels, stubAnalyst, ctx);
+  const defense = buildDefensePrompt(indicators, news, levels, stubAnalyst, "(contoh counter)", ctx);
+  return { ok: true, analyst, debater, defense, ctx };
+}
+
 async function doAnalysis() {
   let candles = await getCandles();
 
@@ -825,11 +931,14 @@ async function doAnalysis() {
     // Stage 1 — the analyst proposes a trade plan.
     const analyst = await askAnalyst(indicators, news, levels, settings);
 
-    // Stage 2 — the contrarian debater attacks it with the same data.
-    // Debate failure is non-fatal: we keep the analyst's verdict.
+    // Stage 2 — multi-round debate. Failure is non-fatal: we keep the analyst's
+    // verdict and annotate it.
     let debate;
+    let rounds = [];
     try {
-      debate = await askDebater(indicators, news, levels, analyst, settings);
+      const dr = await runDebate(indicators, news, levels, analyst, settings, 2);
+      debate = dr.debate;
+      rounds = dr.rounds;
     } catch (e) {
       debate = { agree: true, counter: `debat gagal: ${e.message.slice(0, 40)}`, confidence: analyst.confidence, flips: null, error: e.message.slice(0, 60) };
     }
@@ -845,6 +954,7 @@ async function doAnalysis() {
         keyRisks: analyst.keyRisks || []
       },
       debate: { agree: debate.agree, counter: debate.counter, flips: debate.flips },
+      rounds,
       final: { signal: signal.signal, confidence: signal.confidence }
     };
   } catch (e) {
@@ -1082,8 +1192,14 @@ Format: {"signal":"BUY|SELL|WAIT","confidence":0.0-1.0,"reason":"...","trend":"U
 }
 
 // The debater gets the SAME market data plus the analyst's full output, and is
-// told to attack it with numbers, not opinions.
-function buildDebaterPrompt(ind, news, levels, analyst, ctx) {
+// told to attack it with numbers, not opinions. `priorRounds` carries earlier
+// defense/counter turns so a multi-round debate stays coherent.
+function buildDebaterPrompt(ind, news, levels, analyst, ctx, priorRounds = []) {
+  const history = priorRounds.length
+    ? `\nRIWAYAT DEBAT SEBELUMNYA:\n${priorRounds
+        .map((r) => `Ronde ${r.round}: pendebat bilang "${r.counter}" -> analis membela "${r.defense || "-"}"`)
+        .join("\n")}\n`
+    : "";
   return `Kamu pendebat kontrarian senior di desk XAUUSD M15. Tugasmu MENYERANG analisa bawah — bukan sekadar setuju. Output JSON saja.
 
 DATA PASAR (sumber kebenaran):
@@ -1101,16 +1217,42 @@ RESISTANCE: ${fmtLevels(levels.resistances)}
 ${ctx ? `\n${ctx}\n` : ""}
 ANALISA YANG DIBANTAH:
 ${JSON.stringify(analyst)}
-
+${history}
 ATURAN PENDABAT:
 1. Bantahan HARUS menyebut angka dari data di atas (contoh: "RSI ${ind.rsi14.toFixed(0)} sudah dekat overbought", "harga ${ind.price.toFixed(2)} masih di bawah SMA21 ${ind.sma21.toFixed(2)}").
 2. Cek dulu risiko yang si analis akui sendiri (keyRisks) — kalau fatal, tolak sinyalnya.
 3. agree = true hanya kalau bantahanmu kalah kuat.
 4. flips = sinyal yang menurutmu lebih benar ("BUY"/"SELL"/"WAIT"); null kalau kamu setuju.
 5. confidence = keyakinanmu terhadap posisimu (0-1).
-6. Gunakan KONTEKS DATA TERKUMPUL sebagai amunisi bantahan: kalau analis mengabaikan CATATAN TRADER atau bertentangan dengan hasil debat sebelumnya, tolak analisanya (horisontal: konsistensi dengan debat lalu). Jangan setuju hanya karena analis mengulang sinyal debater yang gagal sebelumnya.`;
+6. Gunakan KONTEKS DATA TERKUMPUL sebagai amunisi bantahan: kalau analis mengabaikan CATATAN TRADER atau bertentangan dengan hasil debat sebelumnya, tolak analisanya. Jangan setuju hanya karena analis mengulang sinyal debater yang gagal sebelumnya.
+7. Kalau ini bukan ronde pertama, kamu boleh mengubah keputusanmu bila pembelaan analis memang kuat — jangan keras kepala demi konsistensi.
 
 Format: {"agree":true|false,"counter":"1 kalimat bantahan terkuat berbasis angka","confidence":0.0-1.0,"flips":null|"BUY"|"SELL"|"WAIT"}`;
+}
+
+// The analyst's rebuttal turn in a multi-round debate: it sees the debater's
+// counter and must either defend its call (with numbers) or concede.
+function buildDefensePrompt(ind, news, levels, analyst, counter, ctx) {
+  return `Kamu analis XAUUSD M15 yang barusan dihujani bantahan. Output JSON saja.
+
+DATA PASAR:
+HARGA: ${ind.price.toFixed(2)}
+SMA9: ${ind.sma9.toFixed(2)} | SMA21: ${ind.sma21.toFixed(2)} | RSI14: ${ind.rsi14.toFixed(1)}
+MACD Hist: ${ind.macdHist.toFixed(3)} | ATR14: ${ind.atr14.toFixed(2)}
+VOLUME: ${ind.volume} (avg: ${ind.volSma20.toFixed(1)}, rasio: ${ind.volRatio.toFixed(2)})
+${ctx ? `\n${ctx}\n` : ""}
+SINYALMU:
+${JSON.stringify({ signal: analyst.signal, confidence: analyst.confidence, reason: analyst.reason, slPips: analyst.slPips, tpPips: analyst.tpPips })}
+
+BANTAHAN PENDABAT:
+"${counter}"
+
+ATURAN:
+1. Belalah dengan angka dari data. Kalau bantahan lebih kuat, AKUI (concede = true) dan sebut kelemahanmu.
+2. Jangan pindah kubu cuma karena desakan — hanya kalau data memang mendukung bantahan.
+3. confidence = keyakinanmu setelah bantahan (0-1).
+
+Format: {"concede":true|false,"defense":"1 kalimat pembelaan/akuan berbasis angka","confidence":0.0-1.0}`;
 }
 
 // Final verdict computed in JS from the analyst vs debater outcome.
@@ -1136,12 +1278,10 @@ function decideFinal(analyst, debate) {
   };
 }
 
-async function askAnalyst(ind, news, levels, settings) {
-  const prompt = buildAnalystPrompt(ind, news, levels, await buildContextBlock(settings));
-
-  // The proxy (combo routing) is flaky: it occasionally returns an empty
-  // choice, a truncated JSON tail, or takes too long. Retry with a fresh
-  // timeout per attempt (a shared AbortController would poison later retries).
+// Shared LLM transport for analyst, debater, and defense turns. Returns the
+// parsed JSON object; validation happens in the caller. Retries with a fresh
+// timeout per attempt (a shared AbortController would poison later retries).
+async function callLLM(prompt, { settings, temperature = 0.2, maxTokens = 2000 } = {}) {
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     const ctrl = new AbortController();
@@ -1157,8 +1297,8 @@ async function askAnalyst(ind, news, levels, settings) {
         body: JSON.stringify({
           model: settings.model,
           messages: [{ role: "user", content: prompt }],
-          temperature: 0.2,
-          max_tokens: 2000,
+          temperature,
+          max_tokens: maxTokens,
           response_format: { type: "json_object" }
         })
       });
@@ -1171,7 +1311,7 @@ async function askAnalyst(ind, news, levels, settings) {
         await chrome.storage.local.set({ llmDebug: { at: Date.now(), attempt, data } });
         throw new Error(`kosong (finish=${data.choices?.[0]?.finish_reason})`);
       }
-      return validateSignal(parseLLMJson(content), settings);
+      return parseLLMJson(content);
     } catch (e) {
       lastErr = e;
     } finally {
@@ -1181,52 +1321,39 @@ async function askAnalyst(ind, news, levels, settings) {
   throw lastErr;
 }
 
+async function askAnalyst(ind, news, levels, settings, promptOverride) {
+  const prompt = promptOverride || buildAnalystPrompt(ind, news, levels, await buildContextBlock(settings));
+  return validateSignal(await callLLM(prompt, { settings }), settings);
+}
+
+function normDebate(d) {
+  return {
+    agree: d.agree === true,
+    counter: typeof d.counter === "string" ? d.counter.slice(0, 120) : "",
+    confidence:
+      typeof d.confidence === "number" && d.confidence >= 0 && d.confidence <= 1
+        ? d.confidence
+        : 0.5,
+    flips: ["BUY", "SELL", "WAIT"].includes(d.flips) ? d.flips : null
+  };
+}
+
 // Stage 2: the contrarian debater. Failure is non-fatal — runAnalysis keeps the
 // analyst's verdict and annotates it.
 async function askDebater(ind, news, levels, analyst, settings) {
   const prompt = buildDebaterPrompt(ind, news, levels, analyst, await buildContextBlock(settings));
-  let lastErr;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 45_000);
-    try {
-      const resp = await fetch(`${settings.llmBaseUrl || CONFIG.LLM_BASE_URL}/chat/completions`, {
-        method: "POST",
-        signal: ctrl.signal,
-        headers: {
-          Authorization: `Bearer ${settings.llmApiKey || CONFIG.LLM_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: settings.model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.3,
-          max_tokens: 1200,
-          response_format: { type: "json_object" }
-        })
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await readLLMBody(resp);
-      const msg = data.choices?.[0]?.message || {};
-      const content = msg.content?.trim() || msg.reasoning_content || "";
-      if (!content) throw new Error(`kosong (finish=${data.choices?.[0]?.finish_reason})`);
-      const d = parseLLMJson(content);
-      return {
-        agree: d.agree === true,
-        counter: typeof d.counter === "string" ? d.counter.slice(0, 120) : "",
-        confidence:
-          typeof d.confidence === "number" && d.confidence >= 0 && d.confidence <= 1
-            ? d.confidence
-            : 0.5,
-        flips: ["BUY", "SELL", "WAIT"].includes(d.flips) ? d.flips : null
-      };
-    } catch (e) {
-      lastErr = e;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw lastErr;
+  return normDebate(await callLLM(prompt, { settings, temperature: 0.3, maxTokens: 1200 }));
+}
+
+function normDefense(d) {
+  return {
+    concede: d.concede === true,
+    defense: typeof d.defense === "string" ? d.defense.slice(0, 120) : "",
+    confidence:
+      typeof d.confidence === "number" && d.confidence >= 0 && d.confidence <= 1
+        ? d.confidence
+        : 0.5
+  };
 }
 
 // The proxy appends an SSE terminator ("data: [DONE]") to the non-stream JSON
@@ -1343,4 +1470,4 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 // Dev hook: lets dev/cdp.mjs eval call internals from the service worker.
-globalThis.__aiTS = { runAnalysis, requestBackfill, CONFIG };
+globalThis.__aiTS = { runAnalysis, requestBackfill, runManualDebate, previewDebatePrompts, CONFIG };

@@ -58,6 +58,8 @@
       .debate { padding: 6px 16px; border-top: 1px solid #21262D; font-size: 10px; }
       .debate-title { font-weight: 700; color: #C9D1D9; padding-bottom: 4px; }
       .debate .muted { margin-bottom: 3px; line-height: 1.4; }
+      .ptab { color: #8B949E; font-weight: 400; }
+      .ptab.active { color: #1F6FEB; font-weight: 700; }
       .settings-title { font-weight: 700; padding: 8px 0 4px; }
       .settings label { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 0; font-size: 11px; }
       .settings input {
@@ -97,12 +99,29 @@
       <div id="debateBody">
         <div id="debateAnalyst" class="muted">—</div>
         <div id="debateCounter" class="muted">—</div>
+        <div id="debateRounds"></div>
         <div id="debateFinal" class="muted">—</div>
       </div>
     </div>
 
     <div class="row">
       <button id="analyzeBtn" class="primary">Analyze Now</button>
+    </div>
+    <div class="row">
+      <button id="debateNowBtn">Debat Manual</button>
+      <button id="previewPromptBtn">Template Prompt</button>
+    </div>
+
+    <div class="debate" id="promptPreview" hidden>
+      <div class="debate-title">Template Prompt LLM
+        <span id="promptTabs">
+          <span data-tab="analyst" class="ptab active" style="cursor:pointer">Analis</span> ·
+          <span data-tab="debater" class="ptab" style="cursor:pointer">Pendebat</span> ·
+          <span data-tab="defense" class="ptab" style="cursor:pointer">Pembelaan</span>
+        </span>
+        <span id="promptClose" style="float:right;cursor:pointer">✕</span>
+      </div>
+      <pre id="promptText" class="muted" style="white-space:pre-wrap;max-height:320px;overflow-y:auto;font-size:10px;line-height:1.4">—</pre>
     </div>
     <div class="row">
       <button id="fillBtn">Fill Order Panel</button>
