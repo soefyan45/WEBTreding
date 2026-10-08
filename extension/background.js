@@ -78,9 +78,14 @@ async function requestBackfill() {
   }
 
   const existing = await getCandles();
+  const histByTime = new Map(res.candles.map((c) => [c.time, c]));
   const merged = new Map();
-  for (const c of res.candles) merged.set(c.time, c); // history first
-  for (const c of existing) merged.set(c.time, c); // live candles win on overlap
+  for (const c of res.candles) merged.set(c.time, c);
+  for (const live of existing) {
+    const hist = histByTime.get(live.time);
+    if (hist) live.v = live.v || hist.v || 0;
+    merged.set(live.time, live);
+  }
 
   const candles = [...merged.values()].sort((a, b) => a.time - b.time).slice(-250);
   await saveCandles(candles);
@@ -910,10 +915,11 @@ function heuristicSignal(i, settings) {
   const atrPips = Math.round((i.atr14 || 5) / 0.1);
   const slPips = Math.min(1000, Math.max(settings.minSlPips, Math.round(1.5 * atrPips)));
   const tpPips = Math.min(2000, Math.max(settings.minSlPips + 50, Math.round(2.5 * atrPips)));
+  const volBoost = (i.volRatio || 0) > 1.2;
   if (i.sma9 > i.sma21 && i.rsi14 > 50)
-    return { signal: "BUY", confidence: 0.6, reason: "heuristic: SMA9>SMA21 + RSI>50", slPips, tpPips };
+    return { signal: "BUY", confidence: volBoost ? 0.65 : 0.6, reason: volBoost ? "heuristic: SMA9>SMA21 + RSI>50 + volume tinggi" : "heuristic: SMA9>SMA21 + RSI>50", slPips, tpPips };
   if (i.sma9 < i.sma21 && i.rsi14 < 50)
-    return { signal: "SELL", confidence: 0.6, reason: "heuristic: SMA9<SMA21 + RSI<50", slPips, tpPips };
+    return { signal: "SELL", confidence: volBoost ? 0.65 : 0.6, reason: volBoost ? "heuristic: SMA9<SMA21 + RSI<50 + volume tinggi" : "heuristic: SMA9<SMA21 + RSI<50", slPips, tpPips };
   return { signal: "WAIT", confidence: 0.5, reason: "heuristic: tidak ada konfluensi", slPips, tpPips };
 }
 
@@ -1007,6 +1013,7 @@ SMA9: ${ind.sma9.toFixed(2)} | SMA21: ${ind.sma21.toFixed(2)} | RSI14: ${ind.rsi
 BB Upper: ${ind.bbUpper.toFixed(2)} | BB Lower: ${ind.bbLower.toFixed(2)}
 MACD Hist: ${ind.macdHist.toFixed(3)} | ATR14: ${ind.atr14.toFixed(2)}
 Slope SMA9 (20 bar, per bar): ${ind.slopeSMA9.toFixed(3)}
+VOLUME: ${ind.volume} (avg 20-bar: ${ind.volSma20.toFixed(1)}, rasio: ${ind.volRatio.toFixed(2)})
 Bentuk 5 close terakhir (offset dari harga sekarang): [${ind.recentShape}]
 
 KALENDER HIGH-IMPACT 24 JAM:
@@ -1019,12 +1026,13 @@ RESISTANCE: ${fmtLevels(levels.resistances)}
 METODOLOGI (urutkan proses berpikirmu):
 1. Tren: baca slope SMA9 + posisi harga vs SMA9/SMA21 -> trend UP/DOWN/FLAT.
 2. Momentum: RSI + MACD hist + posisi vs Bollinger.
-3. Struktur: jarak harga ke S/R terdekat; breakout/breakdown mana paling mungkin.
-4. Risiko: event berita, level terlalu jauh, momentum berlawanan tren.
+3. Volume: rasio volume bar vs rata-rata 20 bar (volRatio > 1 = volume di atas normal). Volume tinggi bisa menguatkan sinyal tren; divergensi/volume rendah melemahkan. Konfirmasi breakout dengan volume.
+4. Struktur: jarak harga ke S/R terdekat; breakout/breakdown mana paling mungkin.
+5. Risiko: event berita, level terlalu jauh, momentum berlawanan tren.
 
 ATURAN OUTPUT:
 1. Event high-impact <30 menit -> signal WAIT.
-2. Butuh minimal 2 konfluensi untuk BUY/SELL; confidence >= 0.6, selain itu WAIT.
+2. Butuh minimal 2 konfluensi untuk BUY/SELL; confidence >= 0.6, selain itu WAIT. Volume di atas rata-rata (volRatio > 1.2) bisa jadi konfluensi tambahan.
 3. trend = UP|DOWN|FLAT; trendNote 1 kalimat arah pasar.
 4. targetPrice = prediksi harga tujuan; WAJIB dalam 5x ATR14 dari harga sekarang.
 5. keyRisks = 1-2 kelemahan analisamu sendiri (dipakai pendebat).
@@ -1045,6 +1053,7 @@ SMA9: ${ind.sma9.toFixed(2)} | SMA21: ${ind.sma21.toFixed(2)} | RSI14: ${ind.rsi
 BB Upper: ${ind.bbUpper.toFixed(2)} | BB Lower: ${ind.bbLower.toFixed(2)}
 MACD Hist: ${ind.macdHist.toFixed(3)} | ATR14: ${ind.atr14.toFixed(2)}
 Slope SMA9 (20 bar): ${ind.slopeSMA9.toFixed(3)}
+VOLUME: ${ind.volume} (avg 20-bar: ${ind.volSma20.toFixed(1)}, rasio: ${ind.volRatio.toFixed(2)})
 Bentuk 5 close terakhir (offset dari harga sekarang): [${ind.recentShape}]
 KALENDER HIGH-IMPACT 24 JAM:
 ${news}

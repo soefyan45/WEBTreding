@@ -133,7 +133,7 @@ async function backfillCandles(timeFrameSec = 900, count = 300) {
   const history = data.price_history || [];
   if (!history.length) throw new Error("rtapi balik tanpa candle (price_history kosong)");
 
-  return history.map((c) => ({ time: c.t, o: c.o, h: c.h, l: c.l, c: c.c }));
+  return history.map((c) => ({ time: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v || 0 }));
 }
 
 window.__aiTradingBackfill = backfillCandles;

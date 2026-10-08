@@ -81,9 +81,21 @@ export function recentShape(candles, count = 5) {
   return closes.map((c) => (c - last).toFixed(2)).join(" ");
 }
 
+// Volume per bar: prefer broker tick volume (c.v from the history API), else
+// the live tick counter (c.ticks). Returns the latest bar's volume plus the
+// 20-bar average, so the caller can gauge whether activity is above/below norm.
+export function volumeStats(candles, period = 20) {
+  const vol = candles.map((c) => (c.v || c.ticks || 0));
+  const last = vol[vol.length - 1] || 0;
+  const slice = vol.slice(-period);
+  const avg = slice.length ? slice.reduce((a, b) => a + b, 0) / slice.length : 0;
+  return { volume: last, volSma20: avg, volRatio: avg ? last / avg : 0 };
+}
+
 export function computeIndicators(candles) {
   const closes = candles.map((c) => c.c);
   const bb = bollinger(closes, 20, 2);
+  const vol = volumeStats(candles, 20);
   return {
     price: closes[closes.length - 1],
     sma9: sma(closes, 9),
@@ -94,6 +106,9 @@ export function computeIndicators(candles) {
     macdHist: computeMacdHist(closes),
     atr14: atr(candles, 14),
     slopeSMA9: slopeSMA9(candles, 20),
-    recentShape: recentShape(candles, 5)
+    recentShape: recentShape(candles, 5),
+    volume: vol.volume,
+    volSma20: vol.volSma20,
+    volRatio: vol.volRatio
   };
 }

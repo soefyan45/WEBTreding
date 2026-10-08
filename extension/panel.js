@@ -162,6 +162,7 @@ async function render() {
       <span><b>RSI14</b> ${fmt(i.rsi14, 1)}</span><span><b>ATR14</b> ${fmt(i.atr14, 2)}</span>
       <span><b>BB U</b> ${fmt(i.bbUpper)}</span><span><b>BB L</b> ${fmt(i.bbLower)}</span>
       <span><b>MACD H</b> ${fmt(i.macdHist, 3)}</span><span><b>Price</b> ${fmt(i.price)}</span>
+      <span><b>Volume</b> ${fmt(i.volume, 0)} (${fmt(i.volRatio, 2)}x avg)</span><span><b>Vol Avg</b> ${fmt(i.volSma20, 1)}</span>
       ${lastSignal.levelNote ? `<span style="grid-column:1/-1"><b>${lvSrc}</b>: ${lastSignal.levelNote}</span>` : ""}
       ${breaks ? `<span style="grid-column:1/-1;color:#FFA500"><b>${breaks}</b></span>` : ""}
       ${lastSignal.trend ? `<span style="grid-column:1/-1"><b>Tren</b> ${lastSignal.trend}${lastSignal.trendNote ? `: ${lastSignal.trendNote}` : ""}${lastSignal.targetPrice ? ` → target ${fmt(lastSignal.targetPrice)}` : ""}</span>` : ""}

@@ -17,12 +17,13 @@ export function applyTick(candles, price, ts) {
   const last = candles[candles.length - 1];
 
   if (!last || last.time !== bucketTs) {
-    candles.push({ time: bucketTs, o: price, h: price, l: price, c: price });
+    candles.push({ time: bucketTs, o: price, h: price, l: price, c: price, v: 0, ticks: 1 });
     if (candles.length > MAX_CANDLES) candles.shift();
   } else {
     last.h = Math.max(last.h, price);
     last.l = Math.min(last.l, price);
     last.c = price;
+    last.ticks = (last.ticks || 0) + 1;
   }
   return candles;
 }
