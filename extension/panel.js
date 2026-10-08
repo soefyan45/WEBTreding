@@ -242,6 +242,17 @@ els.debateNowBtn?.addEventListener("click", async () => {
     if (!res?.ok) {
       els.debateAnalyst.textContent = "Gagal: " + (res?.error || "tidak diketahui");
     } else {
+      // After a manual debate, surface the exact prompts that were actually sent
+      // in the Template Prompt preview so the trader can review / reuse them.
+      if (res.prompts) {
+        promptCache = {
+          analyst: res.prompts.analyst,
+          debater: res.prompts.debater,
+          defense: res.prompts.defense
+        };
+        els.promptPreview.hidden = false;
+        showPromptTab("analyst");
+      }
       renderManualDebate(res);
     }
   } catch (e) {

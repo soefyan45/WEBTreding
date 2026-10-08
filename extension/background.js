@@ -819,9 +819,11 @@ async function runAnalysis() {
 async function runDebate(ind, news, levels, analyst, settings, maxRounds = 2) {
   const ctx = await buildContextBlock(settings);
   const rounds = [];
+  const prompts = { debater: [], defense: [] };
   let debate = null;
   for (let r = 1; r <= maxRounds; r++) {
     const prompt = buildDebaterPrompt(ind, news, levels, analyst, ctx, rounds);
+    prompts.debater.push(prompt);
     debate = normDebate(await callLLM(prompt, { settings, temperature: 0.3, maxTokens: 1200 }));
     if (debate.agree) {
       rounds.push({ round: r, agree: true, counter: debate.counter, flips: null, defense: null });
@@ -830,12 +832,13 @@ async function runDebate(ind, news, levels, analyst, settings, maxRounds = 2) {
     rounds.push({ round: r, agree: false, counter: debate.counter, flips: debate.flips, defense: null });
     if (r === maxRounds) break; // last round: no rebuttal round follows
     const defPrompt = buildDefensePrompt(ind, news, levels, analyst, debate.counter, ctx);
+    prompts.defense.push(defPrompt);
     const d = normDefense(await callLLM(defPrompt, { settings, temperature: 0.3, maxTokens: 800 }));
     rounds[rounds.length - 1].defense = d.defense;
     rounds[rounds.length - 1].concede = d.concede;
     if (d.concede) break;
   }
-  return { debate, rounds };
+  return { debate, rounds, prompts };
 }
 
 // Shared prep for the panel-driven flows (manual debate, prompt preview).
@@ -856,6 +859,13 @@ async function prepareAnalysisInputs() {
   };
 }
 
+// Stacks per-round prompt captures into one previewable text block.
+function joinRoundPrompts(list) {
+  if (!list || !list.length) return "";
+  if (list.length === 1) return list[0];
+  return list.map((p, i) => `--- RONDE ${i + 1} ---\n${p}`).join("\n\n");
+}
+
 // Runs a debate on current data WITHOUT touching lastSignal/badge/history —
 // the panel shows the result, the scheduled analysis is unaffected.
 async function runManualDebate() {
@@ -863,8 +873,10 @@ async function runManualDebate() {
   if (prep.error) return { ok: false, error: prep.error };
   const { indicators, news, levels, settings } = prep;
 
-  const analyst = await askAnalyst(indicators, news, levels, settings);
-  const { debate, rounds } = await runDebate(indicators, news, levels, analyst, settings, 2);
+  const ctx = await buildContextBlock(settings);
+  const analystPrompt = buildAnalystPrompt(indicators, news, levels, ctx);
+  const analyst = await askAnalyst(indicators, news, levels, settings, analystPrompt);
+  const { debate, rounds, prompts } = await runDebate(indicators, news, levels, analyst, settings, 2);
   const final = decideFinal(analyst, debate);
 
   return {
@@ -879,7 +891,12 @@ async function runManualDebate() {
     },
     debate,
     rounds,
-    final: { signal: final.signal, confidence: final.confidence }
+    final: { signal: final.signal, confidence: final.confidence },
+    prompts: {
+      analyst: analystPrompt,
+      debater: joinRoundPrompts(prompts.debater),
+      defense: joinRoundPrompts(prompts.defense)
+    }
   };
 }
 
